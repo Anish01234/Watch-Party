@@ -121,7 +121,10 @@ io.on('connection', (socket) => {
         break;
       case 'seek':
         room.currentTime = data.currentTime;
-        socket.to(roomId).emit('sync_seek', { currentTime: data.currentTime });
+        if (data.isPlaying !== undefined) {
+          room.isPlaying = data.isPlaying;
+        }
+        socket.to(roomId).emit('sync_seek', { currentTime: data.currentTime, isPlaying: data.isPlaying });
         break;
     }
   });

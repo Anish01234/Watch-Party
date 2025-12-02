@@ -70,11 +70,20 @@ function App() {
       }
     });
 
-    socket.on('sync_seek', ({ currentTime }) => {
-      console.log('Sync seek to:', currentTime);
+    socket.on('sync_seek', ({ currentTime, isPlaying }) => {
+      console.log('Sync seek to:', currentTime, 'isPlaying:', isPlaying);
       if (videoRef.current && !isSyncingRef.current) {
         isSyncingRef.current = true;
+        const wasPlaying = !videoRef.current.paused;
         videoRef.current.currentTime = currentTime;
+
+        // Preserve the playing state from the user who seeked
+        if (isPlaying && wasPlaying) {
+          videoRef.current.play().catch(err => console.error('Play after seek failed:', err));
+        } else if (isPlaying && !wasPlaying) {
+          videoRef.current.play().catch(err => console.error('Play after seek failed:', err));
+        }
+
         setTimeout(() => { isSyncingRef.current = false; }, 500);
       }
     });
@@ -156,7 +165,8 @@ function App() {
   const handleSeeked = () => {
     if (videoRef.current && !isSyncingRef.current) {
       const currentTime = videoRef.current.currentTime;
-      socket.emit('sync_action', { roomId, action: 'seek', data: { currentTime } });
+      const isPlaying = !videoRef.current.paused;
+      socket.emit('sync_action', { roomId, action: 'seek', data: { currentTime, isPlaying } });
     }
   };
 
