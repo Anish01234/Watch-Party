@@ -82,6 +82,8 @@ function App() {
           videoRef.current.play().catch(err => console.error('Play after seek failed:', err));
         } else if (isPlaying && !wasPlaying) {
           videoRef.current.play().catch(err => console.error('Play after seek failed:', err));
+        } else if (!isPlaying) {
+          videoRef.current.pause();
         }
 
         setTimeout(() => { isSyncingRef.current = false; }, 500);
