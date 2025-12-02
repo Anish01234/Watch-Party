@@ -208,7 +208,6 @@ function App() {
   }
 
   const currentVideoUrl = playlist[currentIndex];
-  const isDirectVideo = currentVideoUrl && (currentVideoUrl.endsWith('.mp4') || currentVideoUrl.endsWith('.webm') || currentVideoUrl.endsWith('.ogg'));
 
   return (
     <div className="app">
@@ -224,29 +223,21 @@ function App() {
         <div className="player-section">
           <div className="player-wrapper">
             {currentVideoUrl ? (
-              isDirectVideo ? (
-                <video
-                  ref={videoRef}
-                  src={currentVideoUrl}
-                  controls
-                  style={{ width: '100%', height: '100%', background: '#000' }}
-                  onPlay={handlePlay}
-                  onPause={handlePause}
-                  onSeeked={handleSeeked}
-                  onError={(e) => console.error('Video error:', e)}
-                />
-              ) : (
-                <div className="empty-player">
-                  <div className="empty-icon">⚠️</div>
-                  <p>YouTube videos are not supported</p>
-                  <p className="hint">Please use direct video links (.mp4, .webm)</p>
-                </div>
-              )
+              <video
+                ref={videoRef}
+                src={currentVideoUrl}
+                controls
+                style={{ width: '100%', height: '100%', background: '#000' }}
+                onPlay={handlePlay}
+                onPause={handlePause}
+                onSeeked={handleSeeked}
+                onError={(e) => console.error('Video error:', e)}
+              />
             ) : (
               <div className="empty-player">
                 <div className="empty-icon">🎬</div>
                 <p>Add a video to get started</p>
-                <p className="hint">Use direct video links (.mp4, .webm)</p>
+                <p className="hint">Paste any video URL</p>
               </div>
             )}
           </div>
@@ -263,7 +254,7 @@ function App() {
             <button
               className="btn btn-primary"
               onClick={forcePlay}
-              disabled={!isDirectVideo}
+              disabled={!currentVideoUrl}
               style={{ fontSize: '18px', padding: '12px 24px' }}
             >
               ▶ PLAY VIDEO
