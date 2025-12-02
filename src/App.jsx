@@ -15,6 +15,7 @@ function App() {
   const [userCount, setUserCount] = useState(1);
 
   const videoRef = useRef(null);
+  const isSyncingRef = useRef(false);
 
   useEffect(() => {
     socket.on('room_state', (state) => {
@@ -22,6 +23,12 @@ function App() {
       setPlaylist(state.playlist || []);
       setCurrentIndex(state.currentIndex || 0);
       setUserCount(state.users.length);
+
+      // Sync initial playback state
+      if (videoRef.current && state.isPlaying) {
+        videoRef.current.currentTime = state.currentTime || 0;
+        videoRef.current.play().catch(err => console.error('Auto-play failed:', err));
+      }
     });
 
     socket.on('playlist_updated', ({ playlist: newPlaylist, currentIndex: newIndex }) => {
@@ -32,9 +39,44 @@ function App() {
       }
     });
 
-    socket.on('video_changed', ({ currentIndex: newIndex }) => {
+    socket.on('video_changed', ({ currentIndex: newIndex, currentTime, isPlaying }) => {
       console.log('Video changed:', newIndex);
       setCurrentIndex(newIndex);
+      if (videoRef.current) {
+        videoRef.current.currentTime = currentTime || 0;
+        if (isPlaying) {
+          videoRef.current.play().catch(err => console.error('Play failed:', err));
+        }
+      }
+    });
+
+    socket.on('sync_play', ({ currentTime }) => {
+      console.log('Sync play at:', currentTime);
+      if (videoRef.current && !isSyncingRef.current) {
+        isSyncingRef.current = true;
+        videoRef.current.currentTime = currentTime;
+        videoRef.current.play().catch(err => console.error('Sync play failed:', err));
+        setTimeout(() => { isSyncingRef.current = false; }, 500);
+      }
+    });
+
+    socket.on('sync_pause', ({ currentTime }) => {
+      console.log('Sync pause at:', currentTime);
+      if (videoRef.current && !isSyncingRef.current) {
+        isSyncingRef.current = true;
+        videoRef.current.currentTime = currentTime;
+        videoRef.current.pause();
+        setTimeout(() => { isSyncingRef.current = false; }, 500);
+      }
+    });
+
+    socket.on('sync_seek', ({ currentTime }) => {
+      console.log('Sync seek to:', currentTime);
+      if (videoRef.current && !isSyncingRef.current) {
+        isSyncingRef.current = true;
+        videoRef.current.currentTime = currentTime;
+        setTimeout(() => { isSyncingRef.current = false; }, 500);
+      }
     });
 
     socket.on('user_joined', ({ username: newUser, userCount: count }) => {
@@ -51,6 +93,9 @@ function App() {
       socket.off('room_state');
       socket.off('playlist_updated');
       socket.off('video_changed');
+      socket.off('sync_play');
+      socket.off('sync_pause');
+      socket.off('sync_seek');
       socket.off('user_joined');
       socket.off('user_left');
     };
@@ -91,6 +136,27 @@ function App() {
   const handlePrevious = () => {
     if (currentIndex > 0) {
       handleChangeVideo(currentIndex - 1);
+    }
+  };
+
+  const handlePlay = () => {
+    if (videoRef.current && !isSyncingRef.current) {
+      const currentTime = videoRef.current.currentTime;
+      socket.emit('sync_action', { roomId, action: 'play', data: { currentTime } });
+    }
+  };
+
+  const handlePause = () => {
+    if (videoRef.current && !isSyncingRef.current) {
+      const currentTime = videoRef.current.currentTime;
+      socket.emit('sync_action', { roomId, action: 'pause', data: { currentTime } });
+    }
+  };
+
+  const handleSeeked = () => {
+    if (videoRef.current && !isSyncingRef.current) {
+      const currentTime = videoRef.current.currentTime;
+      socket.emit('sync_action', { roomId, action: 'seek', data: { currentTime } });
     }
   };
 
@@ -164,6 +230,9 @@ function App() {
                   src={currentVideoUrl}
                   controls
                   style={{ width: '100%', height: '100%', background: '#000' }}
+                  onPlay={handlePlay}
+                  onPause={handlePause}
+                  onSeeked={handleSeeked}
                   onError={(e) => console.error('Video error:', e)}
                 />
               ) : (
