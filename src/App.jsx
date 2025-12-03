@@ -194,6 +194,7 @@ function App() {
     socket.on('video_changed', ({ currentIndex: index, isPlaying: playing }) => {
       setCurrentIndex(index);
       setIsPlaying(playing);
+      isPlayingRef.current = playing;
     });
 
     socket.on('sync_play', ({ currentTime }) => {
@@ -205,6 +206,7 @@ function App() {
 
       isSyncingRef.current = true;
       setIsPlaying(true);
+      isPlayingRef.current = true;
 
       if (isYouTubeRef.current && youtubePlayerRef.current) {
         if (timeDiff >= 2) youtubePlayerRef.current.seekTo(currentTime, true);
@@ -225,6 +227,7 @@ function App() {
 
       isSyncingRef.current = true;
       setIsPlaying(false);
+      isPlayingRef.current = false;
 
       if (isYouTubeRef.current && youtubePlayerRef.current) {
         youtubePlayerRef.current.seekTo(currentTime, true);
@@ -253,7 +256,10 @@ function App() {
           videoRef.current.pause();
         }
       }
-      if (shouldPlay !== undefined) setIsPlaying(shouldPlay);
+      if (shouldPlay !== undefined) {
+        setIsPlaying(shouldPlay);
+        isPlayingRef.current = shouldPlay;
+      }
       setTimeout(() => { isSyncingRef.current = false; }, 1000);
     });
 
