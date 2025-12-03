@@ -248,6 +248,8 @@ function App() {
               if (isPlayingRef.current) {
                 event.target.playVideo();
               }
+              // Explicitly ask for sync when ready
+              socket.emit('ask_for_time', { roomId: roomIdRef.current });
             },
             onStateChange: (event) => {
               if (isSyncingRef.current) return; // Don't emit if we're syncing
@@ -286,11 +288,7 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const extractYouTubeId = (url) => {
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
-    const match = url.match(regExp);
-    return (match && match[2].length === 11) ? match[2] : null;
-  };
+
 
   const handleJoinRoom = (e) => {
     e.preventDefault();
@@ -401,6 +399,7 @@ function App() {
                     style={{ width: '100%', height: '100%', backgroundColor: '#000' }}
                     onPlay={handleVideoPlay}
                     onPause={handleVideoPause}
+                    onLoadedMetadata={() => socket.emit('ask_for_time', { roomId: roomIdRef.current })}
                     playsInline
                     crossOrigin="anonymous"
                   />

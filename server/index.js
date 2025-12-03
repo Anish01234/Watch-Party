@@ -159,6 +159,17 @@ io.on('connection', (socket) => {
     io.to(requesterId).emit('sync_seek', { currentTime, isPlaying });
   });
 
+  // Handle explicit time request from new user (when player is ready)
+  socket.on('ask_for_time', ({ roomId }) => {
+    const room = rooms.get(roomId);
+    if (room && room.users.length > 1) {
+      const existingUser = room.users.find(u => u.id !== socket.id);
+      if (existingUser) {
+        io.to(existingUser.id).emit('request_sync', { requesterId: socket.id });
+      }
+    }
+  });
+
   // Handle chat messages
   socket.on('send_message', ({ roomId, message, username }) => {
     const room = rooms.get(roomId);
