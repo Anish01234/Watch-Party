@@ -47,7 +47,8 @@ io.on('connection', (socket) => {
         currentIndex: 0,
         isPlaying: false,
         currentTime: 0,
-        users: []
+        users: [],
+        messages: [] // Store chat messages
       });
     }
 
@@ -144,12 +145,21 @@ io.on('connection', (socket) => {
 
   // Handle chat messages
   socket.on('send_message', ({ roomId, message, username }) => {
-    io.to(roomId).emit('chat_message', {
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    const chatMessage = {
       id: Date.now(),
       username,
       message,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    });
+    };
+
+    // Store message in room
+    room.messages.push(chatMessage);
+
+    // Broadcast to all users in room (including sender)
+    io.to(roomId).emit('chat_message', chatMessage);
   });
 
   // Handle disconnect

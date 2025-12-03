@@ -28,6 +28,7 @@ function App() {
       setPlaylist(state.playlist || []);
       setCurrentIndex(state.currentIndex || 0);
       setUserCount(state.users.length);
+      setMessages(state.messages || []); // Load existing messages
 
       // Sync initial playback state
       if (videoRef.current && state.isPlaying) {
@@ -261,9 +262,22 @@ function App() {
                 height="100%"
                 onPlay={handlePlay}
                 onPause={handlePause}
+                onProgress={({ playedSeconds }) => {
+                  // Update current time periodically
+                  if (!isSyncingRef.current) {
+                    // Store for sync purposes
+                  }
+                }}
                 onSeek={handleSeek}
                 onError={(e) => console.error('Video error:', e)}
                 config={{
+                  youtube: {
+                    playerVars: {
+                      showinfo: 1,
+                      modestbranding: 1,
+                      rel: 0
+                    }
+                  },
                   file: {
                     attributes: {
                       crossOrigin: "anonymous"
