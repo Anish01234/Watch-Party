@@ -729,10 +729,17 @@ function App() {
 
   const handleAddVideo = (e) => {
     e.preventDefault();
-    if (videoUrl) {
-      socket.emit('add_to_playlist', { roomId, videoUrl });
-      setVideoUrl('');
+    if (!videoUrl) return;
+
+    try {
+      new URL(videoUrl);
+    } catch (_) {
+      alert("Please enter a valid URL (e.g., https://youtube.com/...)");
+      return;
     }
+
+    socket.emit('add_to_playlist', { roomId, videoUrl });
+    setVideoUrl('');
   };
 
   const handleChangeVideo = (index) => {
