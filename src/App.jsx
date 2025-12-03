@@ -73,6 +73,8 @@ function App() {
       setCurrentIndex(data.currentIndex);
       setIsPlaying(data.isPlaying);
       setUsers(data.users || []);
+      setAdminId(data.adminId);
+      setPermissions(data.permissions || 'open');
       setMessages(data.messages.map(msg => ({
         username: msg.username,
         text: msg.message,
@@ -98,6 +100,18 @@ function App() {
           setTimeout(() => { isSyncingRef.current = false; }, 500);
         }, 1000); // Wait for player to be ready
       }
+    });
+
+    socket.on('admin_updated', ({ adminId }) => setAdminId(adminId));
+    socket.on('permissions_updated', ({ permissions }) => setPermissions(permissions));
+
+    socket.on('reaction_received', ({ emoji }) => {
+      const id = Date.now() + Math.random();
+      const x = Math.random() * 80 + 10;
+      setReactions(prev => [...prev, { id, emoji, x }]);
+      setTimeout(() => {
+        setReactions(prev => prev.filter(r => r.id !== id));
+      }, 2000);
     });
 
     socket.on('user_joined', async ({ username: newUser, users: updatedUsers }) => {
@@ -389,6 +403,9 @@ function App() {
   const [remoteStreams, setRemoteStreams] = useState([]); // Array of { id, stream, username, isMuted }
   const [isMuted, setIsMuted] = useState(true);
   const [facingMode, setFacingMode] = useState('user');
+  const [adminId, setAdminId] = useState(null);
+  const [permissions, setPermissions] = useState('open');
+  const [reactions, setReactions] = useState([]);
 
   const peersRef = useRef({}); // socketId -> { peer: RTCPeerConnection }
   const localStreamRef = useRef(null);
@@ -676,6 +693,19 @@ function App() {
                 <p>Add a video to start watching</p>
               </div>
             )}
+            <div className="reactions-container" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: 20 }}>
+              {reactions.map(r => (
+                <div key={r.id} style={{
+                  position: 'absolute',
+                  left: `${r.x}%`,
+                  bottom: '0',
+                  fontSize: '2rem',
+                  animation: 'floatUp 2s ease-out forwards'
+                }}>
+                  {r.emoji}
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="controls glass">
@@ -686,6 +716,20 @@ function App() {
                 <span>No video selected</span>
               )}
             </div>
+
+            <div className="reaction-bar" style={{ display: 'flex', gap: '0.5rem', marginLeft: '1rem' }}>
+              {['❤️', '😂', '😲', '🎉', '🔥'].map(emoji => (
+                <button
+                  key={emoji}
+                  onClick={() => socket.emit('send_reaction', { roomId: roomIdRef.current, emoji })}
+                  style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer', padding: '0' }}
+                  className="emoji-btn"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+
             <div style={{ fontSize: '10px', color: '#aaa' }}>
               State: {isPlaying ? 'PLAYING' : 'PAUSED'} | Index: {currentIndex} | Type: {isYouTube ? 'YouTube' : 'MP4'}
             </div>
@@ -861,6 +905,24 @@ function App() {
           ) : (
             <div className="users-section" style={{ padding: '1rem', overflowY: 'auto' }}>
               <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem', color: 'var(--text-muted)' }}>Connected Users</h3>
+
+              {socket.id === adminId && (
+                <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', borderRadius: '0.5rem', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '0.5rem', color: '#fbbf24' }}>👑 Admin Controls</div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={permissions === 'restricted'}
+                      onChange={() => socket.emit('toggle_permissions', { roomId: roomIdRef.current })}
+                    />
+                    Restrict Controls
+                  </label>
+                  <div style={{ fontSize: '0.7rem', color: '#aaa', marginTop: '0.25rem', paddingLeft: '1.5rem' }}>
+                    Only admin can play/pause/add videos
+                  </div>
+                </div>
+              )}
+
               <div className="users-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {users.map((user, idx) => (
                   <div key={idx} className="user-item" style={{
@@ -884,7 +946,8 @@ function App() {
                     }}>
                       {user.username.charAt(0).toUpperCase()}
                     </div>
-                    <span>{user.username} {user.username === username && '(You)'}</span>
+                    <span style={{ flex: 1 }}>{user.username} {user.username === username && '(You)'}</span>
+                    {user.id === adminId && <span title="Admin" style={{ fontSize: '1.2rem' }}>👑</span>}
                   </div>
                 ))}
               </div>

@@ -56,7 +56,9 @@ io.on('connection', (socket) => {
         isPlaying: false,
         currentTime: 0,
         users: [],
-        messages: [] // Store chat messages
+        messages: [],
+        adminId: socket.id,
+        permissions: 'open'
       });
     }
 
@@ -88,6 +90,7 @@ io.on('connection', (socket) => {
   socket.on('add_to_playlist', ({ roomId, videoUrl }) => {
     const room = rooms.get(roomId);
     if (room) {
+      if (room.permissions === 'restricted' && room.adminId !== socket.id) return;
       room.playlist.push(videoUrl);
       io.to(roomId).emit('playlist_updated', { playlist: room.playlist });
       console.log(`Video added to room ${roomId}:`, videoUrl);
@@ -98,6 +101,7 @@ io.on('connection', (socket) => {
   socket.on('remove_from_playlist', ({ roomId, index }) => {
     const room = rooms.get(roomId);
     if (room && index >= 0 && index < room.playlist.length) {
+      if (room.permissions === 'restricted' && room.adminId !== socket.id) return;
       room.playlist.splice(index, 1);
       // Adjust currentIndex if needed
       if (room.currentIndex >= room.playlist.length && room.playlist.length > 0) {
@@ -114,6 +118,7 @@ io.on('connection', (socket) => {
   socket.on('change_video', ({ roomId, index }) => {
     const room = rooms.get(roomId);
     if (room && index >= 0 && index < room.playlist.length) {
+      if (room.permissions === 'restricted' && room.adminId !== socket.id) return;
       room.currentIndex = index;
       room.currentTime = 0;
       room.isPlaying = true;
@@ -130,6 +135,8 @@ io.on('connection', (socket) => {
   socket.on('sync_action', ({ roomId, action, data }) => {
     const room = rooms.get(roomId);
     if (!room) return;
+
+    if (room.permissions === 'restricted' && room.adminId !== socket.id) return;
 
     // Always update current time
     if (data.currentTime !== undefined) {
@@ -207,6 +214,20 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('chat_message', chatMessage);
   });
 
+  // Admin: Toggle Permissions
+  socket.on('toggle_permissions', ({ roomId }) => {
+    const room = rooms.get(roomId);
+    if (room && room.adminId === socket.id) {
+      room.permissions = room.permissions === 'open' ? 'restricted' : 'open';
+      io.to(roomId).emit('permissions_updated', { permissions: room.permissions });
+    }
+  });
+
+  // Live Reaction
+  socket.on('send_reaction', ({ roomId, emoji }) => {
+    io.to(roomId).emit('reaction_received', { emoji, userId: socket.id });
+  });
+
   // Handle disconnect
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
@@ -218,16 +239,14 @@ io.on('connection', (socket) => {
         const username = room.users[userIndex].username;
         room.users.splice(userIndex, 1);
 
-        // Clean up empty rooms
-        // Clean up empty rooms - DISABLED for development to persist state on refresh
-        /*
-        if (room.users.length === 0) {
-          rooms.delete(roomId);
-          console.log(`Room ${roomId} deleted (empty)`);
-        } else {
-          io.to(roomId).emit('user_left', { username, userCount: room.users.length });
+        // Handle Admin Reassignment
+        if (room.adminId === socket.id) {
+          if (room.users.length > 0) {
+            room.adminId = room.users[0].id;
+            io.to(roomId).emit('admin_updated', { adminId: room.adminId });
+          }
         }
-        */
+
         io.to(roomId).emit('user_left', {
           username,
           userCount: room.users.length,

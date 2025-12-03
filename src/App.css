@@ -623,3 +623,29 @@ video {
     padding: 0.1rem 0.25rem;
   }
 }
+
+/* Reactions */
+@keyframes floatUp {
+  0% {
+    transform: translateY(0) scale(0.5);
+    opacity: 0;
+  }
+
+  10% {
+    opacity: 1;
+    transform: translateY(-20px) scale(1.2);
+  }
+
+  100% {
+    transform: translateY(-300px) scale(1);
+    opacity: 0;
+  }
+}
+
+.emoji-btn {
+  transition: transform 0.1s;
+}
+
+.emoji-btn:active {
+  transform: scale(0.8);
+}
