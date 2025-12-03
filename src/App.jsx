@@ -125,17 +125,20 @@ function App() {
       console.log(`${leftUser} left`);
       if (updatedUsers) setUsers(updatedUsers);
 
-      // Cleanup peers
       const currentIds = updatedUsers.map(u => u.id);
+
+      // Cleanup peers
       Object.keys(peersRef.current).forEach(peerId => {
         if (!currentIds.includes(peerId)) {
           if (peersRef.current[peerId].peer) {
             peersRef.current[peerId].peer.close();
           }
           delete peersRef.current[peerId];
-          setRemoteStreams(prev => prev.filter(s => s.id !== peerId));
         }
       });
+
+      // Cleanup streams - Force remove any stream not in currentIds
+      setRemoteStreams(prev => prev.filter(s => currentIds.includes(s.id)));
     });
 
     // WebRTC Signaling Listeners
