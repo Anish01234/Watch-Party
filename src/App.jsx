@@ -95,6 +95,15 @@ function App() {
       setUserCount(count);
     });
 
+    socket.on('request_sync', ({ requesterId }) => {
+      console.log('Received sync request from:', requesterId);
+      if (videoRef.current) {
+        const currentTime = videoRef.current.currentTime;
+        const isPlaying = !videoRef.current.paused;
+        socket.emit('sync_response', { requesterId, currentTime, isPlaying });
+      }
+    });
+
     socket.on('user_left', ({ username: leftUser, userCount: count }) => {
       console.log('User left:', leftUser);
       setUserCount(count);
@@ -107,6 +116,7 @@ function App() {
       socket.off('sync_play');
       socket.off('sync_pause');
       socket.off('sync_seek');
+      socket.off('request_sync');
       socket.off('user_joined');
       socket.off('user_left');
     };

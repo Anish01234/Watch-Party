@@ -60,6 +60,14 @@ io.on('connection', (socket) => {
     // Notify others in the room
     socket.to(roomId).emit('user_joined', { username, userCount: room.users.length });
 
+    // Request sync from existing users to ensure new user gets exact time
+    if (room.users.length > 1) {
+      const existingUser = room.users.find(u => u.id !== socket.id);
+      if (existingUser) {
+        io.to(existingUser.id).emit('request_sync', { requesterId: socket.id });
+      }
+    }
+
     console.log(`${username} joined room ${roomId}`);
   });
 
@@ -127,6 +135,11 @@ io.on('connection', (socket) => {
         socket.to(roomId).emit('sync_seek', { currentTime: data.currentTime, isPlaying: data.isPlaying });
         break;
     }
+  });
+
+  // Handle sync response from existing user
+  socket.on('sync_response', ({ requesterId, currentTime, isPlaying }) => {
+    io.to(requesterId).emit('sync_seek', { currentTime, isPlaying });
   });
 
   // Handle disconnect
