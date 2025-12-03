@@ -277,6 +277,10 @@ function App() {
       socket.emit('sync_response', { requesterId, currentTime, isPlaying: isPlayingRef.current });
     });
 
+    socket.on('user_muted', ({ userId, isMuted }) => {
+      setRemoteStreams(prev => prev.map(p => p.id === userId ? { ...p, isMuted } : p));
+    });
+
     socket.on('chat_message', (message) => {
       setMessages((prev) => [...prev, {
         username: message.username,
@@ -382,8 +386,9 @@ function App() {
 
 
   const [localStream, setLocalStream] = useState(null);
-  const [remoteStreams, setRemoteStreams] = useState([]); // Array of { id, stream, username }
+  const [remoteStreams, setRemoteStreams] = useState([]); // Array of { id, stream, username, isMuted }
   const [isMuted, setIsMuted] = useState(false);
+  const [facingMode, setFacingMode] = useState('user');
 
   const peersRef = useRef({}); // socketId -> { peer: RTCPeerConnection }
   const localStreamRef = useRef(null);
@@ -448,7 +453,10 @@ function App() {
       localStreamRef.current = null;
     } else {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode },
+          audio: true
+        });
         setLocalStream(stream);
         localStreamRef.current = stream;
         setIsMuted(false);
@@ -472,12 +480,34 @@ function App() {
     }
   };
 
+  const handleFlipCamera = async () => {
+    if (!localStream) return;
+    const newMode = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(newMode);
+    localStream.getTracks().forEach(t => t.stop());
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: newMode }, audio: true });
+      stream.getAudioTracks().forEach(t => t.enabled = !isMuted);
+      setLocalStream(stream);
+      localStreamRef.current = stream;
+      Object.values(peersRef.current).forEach(({ peer }) => {
+        stream.getTracks().forEach(track => {
+          const senders = peer.getSenders();
+          const sender = senders.find(s => s.track && s.track.kind === track.kind);
+          if (sender) sender.replaceTrack(track);
+        });
+      });
+    } catch (err) { console.error("Error flipping camera:", err); }
+  };
+
   const handleToggleMic = () => {
     if (localStream) {
       const audioTrack = localStream.getAudioTracks()[0];
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled;
-        setIsMuted(!audioTrack.enabled);
+        const isNowMuted = !audioTrack.enabled;
+        setIsMuted(isNowMuted);
+        socket.emit('toggle_mute', { roomId: roomIdRef.current, isMuted: isNowMuted });
       }
     }
   };
@@ -623,6 +653,18 @@ function App() {
             <div style={{ fontSize: '10px', color: '#aaa' }}>
               State: {isPlaying ? 'PLAYING' : 'PAUSED'} | Index: {currentIndex} | Type: {isYouTube ? 'YouTube' : 'MP4'}
             </div>
+            {isPlaying && (
+              <button
+                className="btn"
+                onClick={() => {
+                  if (isYouTubeRef.current && youtubePlayerRef.current) youtubePlayerRef.current.playVideo();
+                  else if (videoRef.current) videoRef.current.play();
+                }}
+                style={{ marginLeft: 'auto', background: '#22c55e', padding: '0.25rem 0.5rem', fontSize: '0.8rem', minWidth: 'auto' }}
+              >
+                Force Play
+              </button>
+            )}
           </div>
 
           <div className="video-grid">
@@ -658,6 +700,15 @@ function App() {
                 >
                   {localStream ? "📷" : "🚫"}
                 </button>
+                {localStream && (
+                  <button
+                    className="control-btn"
+                    onClick={handleFlipCamera}
+                    title="Flip Camera"
+                  >
+                    🔄
+                  </button>
+                )}
               </div>
             </div>
 
@@ -671,6 +722,11 @@ function App() {
                   <div className="video-username">
                     {remoteUsername}
                   </div>
+                  {remote.isMuted && (
+                    <div style={{ position: 'absolute', top: '0.5rem', right: '0.5rem', background: 'rgba(0,0,0,0.6)', padding: '0.25rem', borderRadius: '50%' }}>
+                      🔇
+                    </div>
+                  )}
                 </div>
               );
             })}

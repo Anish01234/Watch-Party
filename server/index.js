@@ -183,6 +183,11 @@ io.on('connection', (socket) => {
     io.to(payload.target).emit('ice-candidate', payload);
   });
 
+  // Handle mute toggle
+  socket.on('toggle_mute', ({ roomId, isMuted }) => {
+    socket.to(roomId).emit('user_muted', { userId: socket.id, isMuted });
+  });
+
   // Handle chat messages
   socket.on('send_message', ({ roomId, message, username }) => {
     const room = rooms.get(roomId);
