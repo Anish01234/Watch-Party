@@ -8,6 +8,12 @@ const SOCKET_URL = import.meta.env.PROD
 
 const socket = io(SOCKET_URL);
 
+const extractYouTubeId = (url) => {
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+  const match = url.match(regExp);
+  return (match && match[2].length === 11) ? match[2] : null;
+};
+
 function App() {
   const [joined, setJoined] = useState(false);
   const [roomId, setRoomId] = useState('');
@@ -30,9 +36,17 @@ function App() {
   const usernameRef = useRef('');
   const isSyncingRef = useRef(false); // Prevent sync loops
   const currentVideoIdRef = useRef(null); // Track current YouTube video ID
+  const isPlayingRef = useRef(false); // Track playing state for refs
+  const isYouTubeRef = useRef(false); // Track YouTube state for refs
 
   const currentVideoUrl = playlist[currentIndex];
   const isYouTube = currentVideoUrl && (currentVideoUrl.includes('youtube.com') || currentVideoUrl.includes('youtu.be'));
+
+  // Update refs when state changes
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+    isYouTubeRef.current = isYouTube;
+  }, [isPlaying, isYouTube]);
 
   // Socket listeners
   useEffect(() => {
@@ -60,7 +74,7 @@ function App() {
       if (data.currentTime && data.currentTime > 0) {
         setTimeout(() => {
           isSyncingRef.current = true;
-          if (isYouTube && youtubePlayerRef.current) {
+          if (isYouTubeRef.current && youtubePlayerRef.current) {
             youtubePlayerRef.current.seekTo(data.currentTime, true);
             if (data.isPlaying) {
               youtubePlayerRef.current.playVideo();
@@ -103,7 +117,7 @@ function App() {
     socket.on('sync_play', ({ currentTime }) => {
       isSyncingRef.current = true; // Mark as syncing to prevent loop
       setIsPlaying(true);
-      if (isYouTube && youtubePlayerRef.current) {
+      if (isYouTubeRef.current && youtubePlayerRef.current) {
         youtubePlayerRef.current.seekTo(currentTime, true);
         youtubePlayerRef.current.playVideo();
       } else if (videoRef.current) {
@@ -116,7 +130,7 @@ function App() {
     socket.on('sync_pause', ({ currentTime }) => {
       isSyncingRef.current = true; // Mark as syncing to prevent loop
       setIsPlaying(false);
-      if (isYouTube && youtubePlayerRef.current) {
+      if (isYouTubeRef.current && youtubePlayerRef.current) {
         youtubePlayerRef.current.seekTo(currentTime, true);
         youtubePlayerRef.current.pauseVideo();
       } else if (videoRef.current) {
@@ -128,7 +142,7 @@ function App() {
 
     socket.on('sync_seek', ({ currentTime, isPlaying: shouldPlay }) => {
       isSyncingRef.current = true;
-      if (isYouTube && youtubePlayerRef.current) {
+      if (isYouTubeRef.current && youtubePlayerRef.current) {
         youtubePlayerRef.current.seekTo(currentTime, true);
         if (shouldPlay) {
           youtubePlayerRef.current.playVideo();
@@ -150,12 +164,12 @@ function App() {
     // Handle sync request from new user
     socket.on('request_sync', ({ requesterId }) => {
       let currentTime = 0;
-      if (isYouTube && youtubePlayerRef.current) {
+      if (isYouTubeRef.current && youtubePlayerRef.current) {
         currentTime = youtubePlayerRef.current.getCurrentTime();
       } else if (videoRef.current) {
         currentTime = videoRef.current.currentTime;
       }
-      socket.emit('sync_response', { requesterId, currentTime, isPlaying });
+      socket.emit('sync_response', { requesterId, currentTime, isPlaying: isPlayingRef.current });
     });
 
     socket.on('chat_message', (message) => {
@@ -169,14 +183,17 @@ function App() {
     return () => {
       socket.off('connect');
       socket.off('room_state');
+      socket.off('user_joined');
+      socket.off('user_left');
       socket.off('playlist_updated');
       socket.off('video_changed');
       socket.off('sync_play');
       socket.off('sync_pause');
       socket.off('sync_seek');
+      socket.off('request_sync');
       socket.off('chat_message');
     };
-  }, [isYouTube]);
+  }, []); // Run only once
 
   // Load YouTube API
   useEffect(() => {
@@ -214,7 +231,7 @@ function App() {
           events: {
             onReady: (event) => {
               // If video should be playing when user joins, start it
-              if (isPlaying) {
+              if (isPlayingRef.current) {
                 event.target.playVideo();
               }
             },
@@ -224,11 +241,11 @@ function App() {
               if (event.data === window.YT.PlayerState.PLAYING) {
                 const currentTime = youtubePlayerRef.current.getCurrentTime();
                 setIsPlaying(true);
-                socket.emit('sync_action', { roomId, action: 'play', data: { currentTime } });
+                socket.emit('sync_action', { roomId: roomIdRef.current, action: 'play', data: { currentTime } });
               } else if (event.data === window.YT.PlayerState.PAUSED) {
                 const currentTime = youtubePlayerRef.current.getCurrentTime();
                 setIsPlaying(false);
-                socket.emit('sync_action', { roomId, action: 'pause', data: { currentTime } });
+                socket.emit('sync_action', { roomId: roomIdRef.current, action: 'pause', data: { currentTime } });
               }
             }
           }
@@ -238,7 +255,7 @@ function App() {
       // Clear video ID ref when switching to non-YouTube
       currentVideoIdRef.current = null;
     }
-  }, [currentVideoUrl, isYouTube, roomId, isPlaying]);
+  }, [currentVideoUrl, isYouTube]); // Removed isPlaying and roomId from dependencies
 
   // Auto-play MP4 videos if they should be playing when user joins
   useEffect(() => {
