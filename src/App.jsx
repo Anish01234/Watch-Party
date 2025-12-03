@@ -16,12 +16,53 @@ const extractYouTubeId = (url) => {
 
 const VideoPlayer = ({ stream }) => {
   const videoRef = useRef(null);
+  const [hasVideo, setHasVideo] = useState(false);
+
   useEffect(() => {
     if (videoRef.current && stream) {
       videoRef.current.srcObject = stream;
+
+      const checkVideo = () => {
+        const videoTracks = stream.getVideoTracks();
+        setHasVideo(videoTracks.length > 0 && videoTracks[0].enabled && videoTracks[0].readyState === 'live');
+      };
+
+      checkVideo();
+
+      stream.addEventListener('addtrack', checkVideo);
+      stream.addEventListener('removetrack', checkVideo);
+
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        track.onended = checkVideo;
+        track.onmute = () => setHasVideo(false);
+        track.onunmute = () => setHasVideo(true);
+      }
+
+      return () => {
+        stream.removeEventListener('addtrack', checkVideo);
+        stream.removeEventListener('removetrack', checkVideo);
+      };
+    } else {
+      setHasVideo(false);
     }
   }, [stream]);
-  return <video ref={videoRef} autoPlay playsInline />;
+
+  return (
+    <>
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: hasVideo ? 1 : 0 }}
+      />
+      {!hasVideo && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666', background: '#000' }}>
+          Camera Off
+        </div>
+      )}
+    </>
+  );
 };
 
 function App() {
@@ -965,7 +1006,8 @@ function App() {
             {/* Remote Users */}
             {remoteStreams.map(remote => {
               const user = users.find(u => u.id === remote.id);
-              const remoteUsername = user ? user.username : 'Unknown';
+              if (!user) return null;
+              const remoteUsername = user.username;
               return (
                 <div key={remote.id} className={`video-card ${speakingUsers.has(remote.id) ? 'speaking' : ''}`}>
                   <VideoPlayer stream={remote.stream} />
