@@ -264,15 +264,9 @@ function App() {
                 onReady={() => {
                   console.log('Player ready:', currentVideoUrl);
                 }}
-                onPlay={handlePlay}
-                onPause={handlePause}
                 onProgress={({ playedSeconds }) => {
-                  // Update current time periodically
-                  if (!isSyncingRef.current) {
-                    // Store for sync purposes
-                  }
+                  // Track progress for sync
                 }}
-                onSeek={handleSeek}
                 onError={(e) => console.error('Video error:', e)}
                 config={{
                   youtube: {
