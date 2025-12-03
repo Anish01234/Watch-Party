@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
+import ReactPlayer from 'react-player';
 import './App.css';
 
 // Use production URL in production, localhost in development
@@ -16,6 +17,7 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [activeTab, setActiveTab] = useState('chat'); // 'chat' or 'playlist'
+  const [isPlaying, setIsPlaying] = useState(false);
 
   const videoRef = useRef(null);
   const isSyncingRef = useRef(false);
@@ -29,8 +31,9 @@ function App() {
 
       // Sync initial playback state
       if (videoRef.current && state.isPlaying) {
-        videoRef.current.currentTime = state.currentTime || 0;
-        videoRef.current.play().catch(err => console.error('Auto-play failed:', err));
+        videoRef.current.seekTo(state.currentTime || 0);
+        // ReactPlayer handles play state via props, but we can't easily force it here without state
+        // We'll rely on the isPlaying prop in the render method
       }
     });
 
@@ -46,10 +49,8 @@ function App() {
       console.log('Video changed:', newIndex);
       setCurrentIndex(newIndex);
       if (videoRef.current) {
-        videoRef.current.currentTime = currentTime || 0;
-        if (isPlaying) {
-          videoRef.current.play().catch(err => console.error('Play failed:', err));
-        }
+        videoRef.current.seekTo(currentTime || 0);
+        // isPlaying will be handled by state update in render
       }
     });
 
@@ -57,8 +58,8 @@ function App() {
       console.log('Sync play at:', currentTime);
       if (videoRef.current && !isSyncingRef.current) {
         isSyncingRef.current = true;
-        videoRef.current.currentTime = currentTime;
-        videoRef.current.play().catch(err => console.error('Sync play failed:', err));
+        videoRef.current.seekTo(currentTime);
+        setIsPlaying(true);
         setTimeout(() => { isSyncingRef.current = false; }, 500);
       }
     });
@@ -67,8 +68,8 @@ function App() {
       console.log('Sync pause at:', currentTime);
       if (videoRef.current && !isSyncingRef.current) {
         isSyncingRef.current = true;
-        videoRef.current.currentTime = currentTime;
-        videoRef.current.pause();
+        videoRef.current.seekTo(currentTime);
+        setIsPlaying(false);
         setTimeout(() => { isSyncingRef.current = false; }, 500);
       }
     });
@@ -77,18 +78,8 @@ function App() {
       console.log('Sync seek to:', currentTime, 'isPlaying:', isPlaying);
       if (videoRef.current && !isSyncingRef.current) {
         isSyncingRef.current = true;
-        const wasPlaying = !videoRef.current.paused;
-        videoRef.current.currentTime = currentTime;
-
-        // Preserve the playing state from the user who seeked
-        if (isPlaying && wasPlaying) {
-          videoRef.current.play().catch(err => console.error('Play after seek failed:', err));
-        } else if (isPlaying && !wasPlaying) {
-          videoRef.current.play().catch(err => console.error('Play after seek failed:', err));
-        } else if (!isPlaying) {
-          videoRef.current.pause();
-        }
-
+        videoRef.current.seekTo(currentTime);
+        setIsPlaying(isPlaying);
         setTimeout(() => { isSyncingRef.current = false; }, 500);
       }
     });
@@ -101,8 +92,8 @@ function App() {
     socket.on('request_sync', ({ requesterId }) => {
       console.log('Received sync request from:', requesterId);
       if (videoRef.current) {
-        const currentTime = videoRef.current.currentTime;
-        const isPlaying = !videoRef.current.paused;
+        const currentTime = videoRef.current.getCurrentTime();
+        // We need to use the state variable for isPlaying since we control it
         socket.emit('sync_response', { requesterId, currentTime, isPlaying });
       }
     });
@@ -177,31 +168,31 @@ function App() {
   };
 
   const handlePlay = () => {
-    if (videoRef.current && !isSyncingRef.current) {
-      const currentTime = videoRef.current.currentTime;
+    if (!isSyncingRef.current) {
+      setIsPlaying(true);
+      const currentTime = videoRef.current ? videoRef.current.getCurrentTime() : 0;
       socket.emit('sync_action', { roomId, action: 'play', data: { currentTime } });
     }
   };
 
   const handlePause = () => {
-    if (videoRef.current && !isSyncingRef.current) {
-      const currentTime = videoRef.current.currentTime;
+    if (!isSyncingRef.current) {
+      setIsPlaying(false);
+      const currentTime = videoRef.current ? videoRef.current.getCurrentTime() : 0;
       socket.emit('sync_action', { roomId, action: 'pause', data: { currentTime } });
     }
   };
 
-  const handleSeeked = () => {
-    if (videoRef.current && !isSyncingRef.current) {
-      const currentTime = videoRef.current.currentTime;
-      const isPlaying = !videoRef.current.paused;
-      socket.emit('sync_action', { roomId, action: 'seek', data: { currentTime, isPlaying } });
+  const handleSeek = (seconds) => {
+    if (!isSyncingRef.current) {
+      // isPlaying state is already up to date
+      socket.emit('sync_action', { roomId, action: 'seek', data: { currentTime: seconds, isPlaying } });
     }
   };
 
   const forcePlay = () => {
-    if (videoRef.current) {
-      videoRef.current.play().catch(err => console.error('Play failed:', err));
-    }
+    setIsPlaying(true);
+    handlePlay();
   };
 
   if (!joined) {
@@ -261,21 +252,30 @@ function App() {
         <div className="player-section">
           <div className="player-wrapper">
             {currentVideoUrl ? (
-              <video
+              <ReactPlayer
                 ref={videoRef}
-                src={currentVideoUrl}
-                controls
-                style={{ width: '100%', height: '100%', background: '#000' }}
+                url={currentVideoUrl}
+                playing={isPlaying}
+                controls={true}
+                width="100%"
+                height="100%"
                 onPlay={handlePlay}
                 onPause={handlePause}
-                onSeeked={handleSeeked}
+                onSeek={handleSeek}
                 onError={(e) => console.error('Video error:', e)}
+                config={{
+                  file: {
+                    attributes: {
+                      crossOrigin: "anonymous"
+                    }
+                  }
+                }}
               />
             ) : (
               <div className="empty-player">
                 <div className="empty-icon">🎬</div>
                 <p>Add a video to get started</p>
-                <p className="hint">Paste any video URL</p>
+                <p className="hint">Supports YouTube, Twitch, MP4, and more</p>
               </div>
             )}
           </div>
@@ -365,7 +365,7 @@ function App() {
                 <input
                   type="text"
                   className="input"
-                  placeholder="Paste video URL"
+                  placeholder="Paste video URL (YouTube, MP4, etc.)"
                   value={videoUrl}
                   onChange={(e) => setVideoUrl(e.target.value)}
                 />
