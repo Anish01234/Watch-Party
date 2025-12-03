@@ -12,12 +12,20 @@ const app = express();
 const server = createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.NODE_ENV === 'production' ? true : "http://localhost:5173",
-    methods: ["GET", "POST"]
+    origin: process.env.NODE_ENV === 'production'
+      ? true  // Allow all origins in production (same domain)
+      : ["http://localhost:5173", "http://localhost:3000"],
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production'
+    ? true
+    : ["http://localhost:5173", "http://localhost:3000"],
+  credentials: true
+}));
 app.use(express.json());
 
 // Serve static files from the React app in production
