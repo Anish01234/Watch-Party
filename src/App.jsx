@@ -106,12 +106,36 @@ function App() {
       setTimeout(() => { isSyncingRef.current = false; }, 500);
     });
 
-    socket.on('sync_seek', ({ currentTime }) => {
+    socket.on('sync_seek', ({ currentTime, isPlaying: shouldPlay }) => {
+      isSyncingRef.current = true;
       if (isYouTube && youtubePlayerRef.current) {
         youtubePlayerRef.current.seekTo(currentTime, true);
+        if (shouldPlay) {
+          youtubePlayerRef.current.playVideo();
+        } else if (shouldPlay === false) {
+          youtubePlayerRef.current.pauseVideo();
+        }
       } else if (videoRef.current) {
         videoRef.current.currentTime = currentTime;
+        if (shouldPlay) {
+          videoRef.current.play();
+        } else if (shouldPlay === false) {
+          videoRef.current.pause();
+        }
       }
+      if (shouldPlay !== undefined) setIsPlaying(shouldPlay);
+      setTimeout(() => { isSyncingRef.current = false; }, 500);
+    });
+
+    // Handle sync request from new user
+    socket.on('request_sync', ({ requesterId }) => {
+      let currentTime = 0;
+      if (isYouTube && youtubePlayerRef.current) {
+        currentTime = youtubePlayerRef.current.getCurrentTime();
+      } else if (videoRef.current) {
+        currentTime = videoRef.current.currentTime;
+      }
+      socket.emit('sync_response', { requesterId, currentTime, isPlaying });
     });
 
     socket.on('chat_message', (message) => {
