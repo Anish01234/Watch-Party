@@ -21,12 +21,14 @@ function App() {
   const [newMessage, setNewMessage] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
   const [activeTab, setActiveTab] = useState('chat');
+  const [users, setUsers] = useState([]);
 
   const videoRef = useRef(null);
   const youtubePlayerRef = useRef(null);
   const messagesEndRef = useRef(null);
   const roomIdRef = useRef('');
   const usernameRef = useRef('');
+  const isSyncingRef = useRef(false); // Prevent sync loops
 
   const currentVideoUrl = playlist[currentIndex];
   const isYouTube = currentVideoUrl && (currentVideoUrl.includes('youtube.com') || currentVideoUrl.includes('youtu.be'));
@@ -41,16 +43,27 @@ function App() {
     });
 
     socket.on('room_state', (data) => {
-      console.log('Room state:', data);
+      console.log('Joined room:', data);
       setPlaylist(data.playlist);
       setCurrentIndex(data.currentIndex);
       setIsPlaying(data.isPlaying);
+      setUsers(data.users || []);
       setMessages(data.messages.map(msg => ({
         username: msg.username,
         text: msg.message,
         timestamp: msg.timestamp
       })));
       setJoined(true);
+    });
+
+    socket.on('user_joined', ({ username: newUser, userCount, users: updatedUsers }) => {
+      console.log(`${newUser} joined`);
+      if (updatedUsers) setUsers(updatedUsers);
+    });
+
+    socket.on('user_left', ({ username: leftUser, userCount, users: updatedUsers }) => {
+      console.log(`${leftUser} left`);
+      if (updatedUsers) setUsers(updatedUsers);
     });
 
     socket.on('playlist_updated', (data) => {
@@ -68,6 +81,7 @@ function App() {
     });
 
     socket.on('sync_play', ({ currentTime }) => {
+      isSyncingRef.current = true; // Mark as syncing to prevent loop
       setIsPlaying(true);
       if (isYouTube && youtubePlayerRef.current) {
         youtubePlayerRef.current.seekTo(currentTime, true);
@@ -76,9 +90,11 @@ function App() {
         videoRef.current.currentTime = currentTime;
         videoRef.current.play();
       }
+      setTimeout(() => { isSyncingRef.current = false; }, 500);
     });
 
     socket.on('sync_pause', ({ currentTime }) => {
+      isSyncingRef.current = true; // Mark as syncing to prevent loop
       setIsPlaying(false);
       if (isYouTube && youtubePlayerRef.current) {
         youtubePlayerRef.current.seekTo(currentTime, true);
@@ -87,6 +103,7 @@ function App() {
         videoRef.current.currentTime = currentTime;
         videoRef.current.pause();
       }
+      setTimeout(() => { isSyncingRef.current = false; }, 500);
     });
 
     socket.on('sync_seek', ({ currentTime }) => {
@@ -153,6 +170,8 @@ function App() {
               }
             },
             onStateChange: (event) => {
+              if (isSyncingRef.current) return; // Don't emit if we're syncing
+
               if (event.data === window.YT.PlayerState.PLAYING) {
                 const currentTime = youtubePlayerRef.current.getCurrentTime();
                 setIsPlaying(true);
@@ -216,12 +235,14 @@ function App() {
   };
 
   const handleVideoPlay = () => {
+    if (isSyncingRef.current) return; // Don't emit if we're syncing from another user
     const currentTime = videoRef.current ? videoRef.current.currentTime : 0;
     setIsPlaying(true);
     socket.emit('sync_action', { roomId, action: 'play', data: { currentTime } });
   };
 
   const handleVideoPause = () => {
+    if (isSyncingRef.current) return; // Don't emit if we're syncing from another user
     const currentTime = videoRef.current ? videoRef.current.currentTime : 0;
     setIsPlaying(false);
     socket.emit('sync_action', { roomId, action: 'pause', data: { currentTime } });
@@ -271,7 +292,10 @@ function App() {
         </div>
         <div className="header-info">
           <span className="room-badge">Room: {roomId}</span>
-          <span className="user-badge">User: {username}</span>
+          <span className="user-badge">👥 {users.length} {users.length === 1 ? 'User' : 'Users'}</span>
+          <span className="user-badge" title={users.map(u => u.username).join(', ')}>
+            You: {username}
+          </span>
         </div>
       </header>
 

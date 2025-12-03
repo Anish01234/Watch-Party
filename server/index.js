@@ -66,8 +66,12 @@ io.on('connection', (socket) => {
     // Send current room state to the new user
     socket.emit('room_state', room);
 
-    // Notify others in the room
-    socket.to(roomId).emit('user_joined', { username, userCount: room.users.length });
+    // Notify others in the room with updated user list
+    socket.to(roomId).emit('user_joined', {
+      username,
+      userCount: room.users.length,
+      users: room.users
+    });
 
     // Request sync from existing users to ensure new user gets exact time
     if (room.users.length > 1) {
@@ -191,7 +195,11 @@ io.on('connection', (socket) => {
           io.to(roomId).emit('user_left', { username, userCount: room.users.length });
         }
         */
-        io.to(roomId).emit('user_left', { username, userCount: room.users.length });
+        io.to(roomId).emit('user_left', {
+          username,
+          userCount: room.users.length,
+          users: room.users
+        });
       }
     });
   });
