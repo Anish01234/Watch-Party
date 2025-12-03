@@ -29,6 +29,7 @@ function App() {
   const roomIdRef = useRef('');
   const usernameRef = useRef('');
   const isSyncingRef = useRef(false); // Prevent sync loops
+  const currentVideoIdRef = useRef(null); // Track current YouTube video ID
 
   const currentVideoUrl = playlist[currentIndex];
   const isYouTube = currentVideoUrl && (currentVideoUrl.includes('youtube.com') || currentVideoUrl.includes('youtu.be'));
@@ -187,11 +188,16 @@ function App() {
     }
   }, []);
 
-  // Initialize YouTube player
+  // Initialize YouTube player - ONLY when video ID actually changes
   useEffect(() => {
     if (isYouTube && currentVideoUrl && window.YT && window.YT.Player) {
       const videoId = extractYouTubeId(currentVideoUrl);
-      if (videoId) {
+
+      // Only recreate if video ID changed
+      if (videoId && videoId !== currentVideoIdRef.current) {
+        console.log('Creating YouTube player for:', videoId);
+        currentVideoIdRef.current = videoId;
+
         // Destroy old player
         if (youtubePlayerRef.current) {
           youtubePlayerRef.current.destroy();
@@ -228,8 +234,11 @@ function App() {
           }
         });
       }
+    } else if (!isYouTube) {
+      // Clear video ID ref when switching to non-YouTube
+      currentVideoIdRef.current = null;
     }
-  }, [currentVideoUrl, isYouTube]);
+  }, [currentVideoUrl, isYouTube, roomId, isPlaying]);
 
   // Auto-play MP4 videos if they should be playing when user joins
   useEffect(() => {
