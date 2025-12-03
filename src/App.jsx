@@ -114,6 +114,15 @@ function App() {
       }, 2000);
     });
 
+    socket.on('user_speaking', ({ userId, isSpeaking }) => {
+      setSpeakingUsers(prev => {
+        const newSet = new Set(prev);
+        if (isSpeaking) newSet.add(userId);
+        else newSet.delete(userId);
+        return newSet;
+      });
+    });
+
     socket.on('user_joined', async ({ username: newUser, users: updatedUsers }) => {
       console.log(`${newUser} joined`);
       if (updatedUsers) setUsers(updatedUsers);
@@ -406,6 +415,8 @@ function App() {
   const [adminId, setAdminId] = useState(null);
   const [permissions, setPermissions] = useState('open');
   const [reactions, setReactions] = useState([]);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [speakingUsers, setSpeakingUsers] = useState(new Set());
 
   const peersRef = useRef({}); // socketId -> { peer: RTCPeerConnection }
   const localStreamRef = useRef(null);
@@ -462,6 +473,65 @@ function App() {
       localVideoRef.current.srcObject = localStream;
     }
   }, [localStream]);
+
+  const handleScreenShare = async () => {
+    if (isScreenSharing) {
+      if (localStream) {
+        localStream.getVideoTracks().forEach(t => t.stop());
+        // If audio exists, keep it? 
+        // For simplicity, let's just stop video and keep audio if it was there.
+        const audioTrack = localStream.getAudioTracks()[0];
+        if (audioTrack) {
+          const newStream = new MediaStream([audioTrack]);
+          setLocalStream(newStream);
+          localStreamRef.current = newStream;
+        } else {
+          setLocalStream(null);
+          localStreamRef.current = null;
+        }
+
+        Object.values(peersRef.current).forEach(({ peer }) => {
+          const senders = peer.getSenders();
+          const sender = senders.find(s => s.track && s.track.kind === 'video');
+          if (sender) peer.removeTrack(sender);
+        });
+      }
+      setIsScreenSharing(false);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        const screenTrack = stream.getVideoTracks()[0];
+
+        screenTrack.onended = () => {
+          setIsScreenSharing(false);
+          // Handle cleanup similar to above if needed
+        };
+
+        if (localStream) {
+          const audioTrack = localStream.getAudioTracks()[0];
+          const newStream = new MediaStream([screenTrack]);
+          if (audioTrack) newStream.addTrack(audioTrack);
+
+          setLocalStream(newStream);
+          localStreamRef.current = newStream;
+
+          Object.values(peersRef.current).forEach(({ peer }) => {
+            const senders = peer.getSenders();
+            const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+            if (videoSender) videoSender.replaceTrack(screenTrack);
+            else peer.addTrack(screenTrack, newStream);
+          });
+        } else {
+          setLocalStream(stream);
+          localStreamRef.current = stream;
+          Object.values(peersRef.current).forEach(({ peer }) => {
+            stream.getTracks().forEach(track => peer.addTrack(track, stream));
+          });
+        }
+        setIsScreenSharing(true);
+      } catch (err) { console.error("Error sharing screen:", err); }
+    }
+  };
 
   const handleToggleWebcam = async () => {
     if (localStream) {
@@ -571,6 +641,76 @@ function App() {
       socket.emit('remove_from_playlist', { roomId: roomIdRef.current, index });
     }
   };
+
+  // Audio Analysis Effect
+  useEffect(() => {
+    if (!localStream) return;
+
+    // Check if audio track exists and is enabled
+    const audioTrack = localStream.getAudioTracks()[0];
+    if (!audioTrack || !audioTrack.enabled) return;
+
+    let audioContext;
+    try {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {
+      console.error("AudioContext not supported", e);
+      return;
+    }
+
+    const analyser = audioContext.createAnalyser();
+    const microphone = audioContext.createMediaStreamSource(localStream);
+    const scriptProcessor = audioContext.createScriptProcessor(2048, 1, 1);
+
+    analyser.smoothingTimeConstant = 0.8;
+    analyser.fftSize = 1024;
+
+    microphone.connect(analyser);
+    analyser.connect(scriptProcessor);
+    scriptProcessor.connect(audioContext.destination);
+
+    let lastSpeakingState = false;
+    let speakingFrames = 0;
+
+    scriptProcessor.onaudioprocess = () => {
+      const array = new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(array);
+      let values = 0;
+      const length = array.length;
+      for (let i = 0; i < length; i++) {
+        values += array[i];
+      }
+      const average = values / length;
+
+      const isSpeaking = average > 10; // Threshold
+
+      if (isSpeaking) {
+        speakingFrames++;
+      } else {
+        speakingFrames = Math.max(0, speakingFrames - 1);
+      }
+
+      const isSpeakingStable = speakingFrames > 5; // Debounce
+
+      if (isSpeakingStable !== lastSpeakingState) {
+        lastSpeakingState = isSpeakingStable;
+        socket.emit('speaking_status', { roomId: roomIdRef.current, isSpeaking: isSpeakingStable });
+        setSpeakingUsers(prev => {
+          const newSet = new Set(prev);
+          if (isSpeakingStable) newSet.add(socket.id);
+          else newSet.delete(socket.id);
+          return newSet;
+        });
+      }
+    };
+
+    return () => {
+      scriptProcessor.disconnect();
+      analyser.disconnect();
+      microphone.disconnect();
+      audioContext.close();
+    };
+  }, [localStream, isMuted]);
 
   const handleJoinRoom = (e) => {
     e.preventDefault();
@@ -749,7 +889,7 @@ function App() {
 
           <div className="video-grid">
             {/* Local User */}
-            <div className="video-card">
+            <div className={`video-card ${speakingUsers.has(socket.id) ? 'speaking' : ''}`}>
               <video
                 ref={localVideoRef}
                 autoPlay
@@ -780,7 +920,14 @@ function App() {
                 >
                   {(localStream && localStream.getVideoTracks().length > 0) ? "📷" : "🚫"}
                 </button>
-                {localStream && localStream.getVideoTracks().length > 0 && (
+                <button
+                  className={`control-btn ${isScreenSharing ? 'active' : ''}`}
+                  onClick={handleScreenShare}
+                  title={isScreenSharing ? "Stop Sharing" : "Share Screen"}
+                >
+                  {isScreenSharing ? "🛑" : "🖥️"}
+                </button>
+                {localStream && localStream.getVideoTracks().length > 0 && !isScreenSharing && (
                   <button
                     className="control-btn"
                     onClick={handleFlipCamera}
@@ -797,7 +944,7 @@ function App() {
               const user = users.find(u => u.id === remote.id);
               const remoteUsername = user ? user.username : 'Unknown';
               return (
-                <div key={remote.id} className="video-card">
+                <div key={remote.id} className={`video-card ${speakingUsers.has(remote.id) ? 'speaking' : ''}`}>
                   <VideoPlayer stream={remote.stream} />
                   <div className="video-username">
                     {remoteUsername}

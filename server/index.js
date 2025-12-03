@@ -195,6 +195,11 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('user_muted', { userId: socket.id, isMuted });
   });
 
+  // Handle speaking status
+  socket.on('speaking_status', ({ roomId, isSpeaking }) => {
+    socket.to(roomId).emit('user_speaking', { userId: socket.id, isSpeaking });
+  });
+
   // Handle chat messages
   socket.on('send_message', ({ roomId, message, username }) => {
     const room = rooms.get(roomId);

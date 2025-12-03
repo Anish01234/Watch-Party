@@ -649,3 +649,8 @@ video {
 .emoji-btn:active {
   transform: scale(0.8);
 }
+
+.video-card.speaking {
+  border: 2px solid #22c55e;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+}
