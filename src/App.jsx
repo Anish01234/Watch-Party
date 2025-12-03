@@ -290,6 +290,37 @@ function App() {
 
 
 
+  const [localStream, setLocalStream] = useState(null);
+  const localVideoRef = useRef(null);
+
+  useEffect(() => {
+    if (localStream && localVideoRef.current) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream, activeTab]);
+
+  const handleToggleWebcam = async () => {
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop());
+      setLocalStream(null);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        setLocalStream(stream);
+      } catch (err) {
+        console.error("Error accessing webcam:", err);
+        alert("Could not access webcam/microphone");
+      }
+    }
+  };
+
+  const handleRemoveVideo = (e, index) => {
+    e.stopPropagation(); // Prevent playing the video
+    if (window.confirm('Remove this video from playlist?')) {
+      socket.emit('remove_from_playlist', { roomId: roomIdRef.current, index });
+    }
+  };
+
   const handleJoinRoom = (e) => {
     e.preventDefault();
     if (roomId && username) {
@@ -441,6 +472,12 @@ function App() {
             >
               Playlist
             </button>
+            <button
+              className={`tab-btn ${activeTab === 'users' ? 'active' : ''}`}
+              onClick={() => setActiveTab('users')}
+            >
+              Users ({users.length})
+            </button>
           </div>
 
           {activeTab === 'chat' ? (
@@ -468,7 +505,7 @@ function App() {
                 <button type="submit" className="btn btn-primary">Send</button>
               </form>
             </div>
-          ) : (
+          ) : activeTab === 'playlist' ? (
             <div className="playlist-section">
               <form onSubmit={handleAddVideo} className="add-video-form">
                 <input
@@ -486,13 +523,21 @@ function App() {
                     key={idx}
                     className={`playlist-item ${idx === currentIndex ? 'active' : ''}`}
                   >
-                    <div className="playlist-item-info" onClick={() => handleChangeVideo(idx)}>
+                    <div className="playlist-item-info" onClick={() => handleChangeVideo(idx)} style={{ flex: 1, cursor: 'pointer' }}>
                       <span className="playlist-number">{idx + 1}</span>
                       <div style={{ overflow: 'hidden' }}>
                         <div className="playlist-url" title={url}>{url}</div>
                         {idx === currentIndex && <div className="now-playing">Now Playing</div>}
                       </div>
                     </div>
+                    <button
+                      className="btn-icon"
+                      onClick={(e) => handleRemoveVideo(e, idx)}
+                      style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0.25rem', marginLeft: '0.5rem' }}
+                      title="Remove video"
+                    >
+                      ✕
+                    </button>
                   </div>
                 ))}
                 {playlist.length === 0 && (
@@ -500,6 +545,60 @@ function App() {
                     Playlist is empty
                   </div>
                 )}
+              </div>
+            </div>
+          ) : (
+            <div className="users-section" style={{ padding: '1rem', overflowY: 'auto' }}>
+              <div className="webcam-controls" style={{ marginBottom: '1rem' }}>
+                <button
+                  className={`btn ${localStream ? 'btn-danger' : 'btn-primary'}`}
+                  style={{ width: '100%' }}
+                  onClick={handleToggleWebcam}
+                >
+                  {localStream ? 'Turn Off Camera' : 'Turn On Camera'}
+                </button>
+                {localStream && (
+                  <div className="local-video-preview" style={{ marginTop: '1rem', borderRadius: '0.5rem', overflow: 'hidden', border: '1px solid var(--glass-border)' }}>
+                    <video
+                      ref={localVideoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      style={{ width: '100%', display: 'block', transform: 'scaleX(-1)' }}
+                    />
+                    <div style={{ padding: '0.5rem', background: 'rgba(0,0,0,0.5)', fontSize: '0.8rem', textAlign: 'center' }}>
+                      You (Preview)
+                    </div>
+                  </div>
+                )}
+              </div>
+              <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem', color: 'var(--text-muted)' }}>Connected Users</h3>
+              <div className="users-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {users.map((user, idx) => (
+                  <div key={idx} className="user-item" style={{
+                    padding: '0.75rem',
+                    background: 'rgba(255,255,255,0.05)',
+                    borderRadius: '0.5rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem'
+                  }}>
+                    <div className="user-avatar" style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '50%',
+                      background: 'var(--gradient-main)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 'bold',
+                      fontSize: '0.8rem'
+                    }}>
+                      {user.username.charAt(0).toUpperCase()}
+                    </div>
+                    <span>{user.username} {user.username === username && '(You)'}</span>
+                  </div>
+                ))}
               </div>
             </div>
           )}
