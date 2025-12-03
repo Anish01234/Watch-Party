@@ -115,21 +115,35 @@ function App() {
     });
 
     socket.on('sync_play', ({ currentTime }) => {
-      isSyncingRef.current = true; // Mark as syncing to prevent loop
+      const timeDiff = Math.abs((youtubePlayerRef.current ? youtubePlayerRef.current.getCurrentTime() : videoRef.current ? videoRef.current.currentTime : 0) - currentTime);
+
+      if (isPlayingRef.current && timeDiff < 2) {
+        return; // Already playing and synced, ignore
+      }
+
+      isSyncingRef.current = true;
       setIsPlaying(true);
+
       if (isYouTubeRef.current && youtubePlayerRef.current) {
-        youtubePlayerRef.current.seekTo(currentTime, true);
+        if (timeDiff >= 2) youtubePlayerRef.current.seekTo(currentTime, true);
         youtubePlayerRef.current.playVideo();
       } else if (videoRef.current) {
-        videoRef.current.currentTime = currentTime;
+        if (timeDiff >= 2) videoRef.current.currentTime = currentTime;
         videoRef.current.play();
       }
-      setTimeout(() => { isSyncingRef.current = false; }, 500);
+      setTimeout(() => { isSyncingRef.current = false; }, 1000);
     });
 
     socket.on('sync_pause', ({ currentTime }) => {
-      isSyncingRef.current = true; // Mark as syncing to prevent loop
+      const timeDiff = Math.abs((youtubePlayerRef.current ? youtubePlayerRef.current.getCurrentTime() : videoRef.current ? videoRef.current.currentTime : 0) - currentTime);
+
+      if (!isPlayingRef.current && timeDiff < 2) {
+        return; // Already paused and synced, ignore
+      }
+
+      isSyncingRef.current = true;
       setIsPlaying(false);
+
       if (isYouTubeRef.current && youtubePlayerRef.current) {
         youtubePlayerRef.current.seekTo(currentTime, true);
         youtubePlayerRef.current.pauseVideo();
@@ -137,7 +151,7 @@ function App() {
         videoRef.current.currentTime = currentTime;
         videoRef.current.pause();
       }
-      setTimeout(() => { isSyncingRef.current = false; }, 500);
+      setTimeout(() => { isSyncingRef.current = false; }, 1000);
     });
 
     socket.on('sync_seek', ({ currentTime, isPlaying: shouldPlay }) => {
@@ -158,7 +172,7 @@ function App() {
         }
       }
       if (shouldPlay !== undefined) setIsPlaying(shouldPlay);
-      setTimeout(() => { isSyncingRef.current = false; }, 500);
+      setTimeout(() => { isSyncingRef.current = false; }, 1000);
     });
 
     // Handle sync request from new user
@@ -239,13 +253,17 @@ function App() {
               if (isSyncingRef.current) return; // Don't emit if we're syncing
 
               if (event.data === window.YT.PlayerState.PLAYING) {
-                const currentTime = youtubePlayerRef.current.getCurrentTime();
-                setIsPlaying(true);
-                socket.emit('sync_action', { roomId: roomIdRef.current, action: 'play', data: { currentTime } });
+                if (!isPlayingRef.current) { // Only emit if state changed
+                  const currentTime = youtubePlayerRef.current.getCurrentTime();
+                  setIsPlaying(true);
+                  socket.emit('sync_action', { roomId: roomIdRef.current, action: 'play', data: { currentTime } });
+                }
               } else if (event.data === window.YT.PlayerState.PAUSED) {
-                const currentTime = youtubePlayerRef.current.getCurrentTime();
-                setIsPlaying(false);
-                socket.emit('sync_action', { roomId: roomIdRef.current, action: 'pause', data: { currentTime } });
+                if (isPlayingRef.current) { // Only emit if state changed
+                  const currentTime = youtubePlayerRef.current.getCurrentTime();
+                  setIsPlaying(false);
+                  socket.emit('sync_action', { roomId: roomIdRef.current, action: 'pause', data: { currentTime } });
+                }
               }
             }
           }
@@ -307,14 +325,14 @@ function App() {
     if (isSyncingRef.current) return; // Don't emit if we're syncing from another user
     const currentTime = videoRef.current ? videoRef.current.currentTime : 0;
     setIsPlaying(true);
-    socket.emit('sync_action', { roomId, action: 'play', data: { currentTime } });
+    socket.emit('sync_action', { roomId: roomIdRef.current, action: 'play', data: { currentTime } });
   };
 
   const handleVideoPause = () => {
     if (isSyncingRef.current) return; // Don't emit if we're syncing from another user
     const currentTime = videoRef.current ? videoRef.current.currentTime : 0;
     setIsPlaying(false);
-    socket.emit('sync_action', { roomId, action: 'pause', data: { currentTime } });
+    socket.emit('sync_action', { roomId: roomIdRef.current, action: 'pause', data: { currentTime } });
   };
 
   if (!joined) {
