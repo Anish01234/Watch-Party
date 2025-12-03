@@ -140,8 +140,15 @@ function App() {
 
     // WebRTC Signaling Listeners
     socket.on('offer', async ({ offer, callerId }) => {
-      const peer = createPeer(callerId);
-      peersRef.current[callerId] = { peer };
+      let peerObj = peersRef.current[callerId];
+      let peer;
+
+      if (peerObj) {
+        peer = peerObj.peer;
+      } else {
+        peer = createPeer(callerId);
+        peersRef.current[callerId] = { peer };
+      }
 
       try {
         await peer.setRemoteDescription(new RTCSessionDescription(offer));
@@ -400,13 +407,14 @@ function App() {
 
     peer.ontrack = (event) => {
       setRemoteStreams(prev => {
-        if (prev.find(p => p.id === targetId)) return prev;
-        // Find username from users list
-        // We need access to users state here. Since this is a callback, we might need a ref for users or just pass it?
-        // But createPeer is defined inside component, so it has closure access to 'users'.
-        // However, 'users' state might be stale in closure if createPeer isn't recreated.
-        // But createPeer is called when needed.
-        // Better to store username in peer object or just find it in render.
+        const existing = prev.find(p => p.id === targetId);
+        if (existing) {
+          // If stream is different, update it
+          if (existing.stream.id !== event.streams[0].id) {
+            return prev.map(p => p.id === targetId ? { ...p, stream: event.streams[0] } : p);
+          }
+          return prev;
+        }
         return [...prev, { id: targetId, stream: event.streams[0] }];
       });
     };
