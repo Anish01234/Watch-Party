@@ -14,6 +14,16 @@ const extractYouTubeId = (url) => {
   return (match && match[2].length === 11) ? match[2] : null;
 };
 
+const VideoPlayer = ({ stream }) => {
+  const videoRef = useRef(null);
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+  return <video ref={videoRef} autoPlay playsInline />;
+};
+
 function App() {
   const [joined, setJoined] = useState(false);
   const [roomId, setRoomId] = useState('');
@@ -90,14 +100,79 @@ function App() {
       }
     });
 
-    socket.on('user_joined', ({ username: newUser, userCount, users: updatedUsers }) => {
+    socket.on('user_joined', async ({ username: newUser, users: updatedUsers }) => {
       console.log(`${newUser} joined`);
       if (updatedUsers) setUsers(updatedUsers);
+
+      // Initiate WebRTC call to new user
+      updatedUsers.forEach(async (user) => {
+        if (user.id !== socket.id && !peersRef.current[user.id]) {
+          const peer = createPeer(user.id, true);
+          peersRef.current[user.id] = { peer };
+
+          try {
+            const offer = await peer.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+            await peer.setLocalDescription(offer);
+            socket.emit('offer', { offer, target: user.id, callerId: socket.id });
+          } catch (err) {
+            console.error('Error creating offer:', err);
+          }
+        }
+      });
     });
 
-    socket.on('user_left', ({ username: leftUser, userCount, users: updatedUsers }) => {
+    socket.on('user_left', ({ username: leftUser, users: updatedUsers }) => {
       console.log(`${leftUser} left`);
       if (updatedUsers) setUsers(updatedUsers);
+
+      // Cleanup peers
+      const currentIds = updatedUsers.map(u => u.id);
+      Object.keys(peersRef.current).forEach(peerId => {
+        if (!currentIds.includes(peerId)) {
+          if (peersRef.current[peerId].peer) {
+            peersRef.current[peerId].peer.close();
+          }
+          delete peersRef.current[peerId];
+          setRemoteStreams(prev => prev.filter(s => s.id !== peerId));
+        }
+      });
+    });
+
+    // WebRTC Signaling Listeners
+    socket.on('offer', async ({ offer, callerId }) => {
+      const peer = createPeer(callerId);
+      peersRef.current[callerId] = { peer };
+
+      try {
+        await peer.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+        socket.emit('answer', { answer, target: callerId, callerId: socket.id });
+      } catch (err) {
+        console.error('Error handling offer:', err);
+      }
+    });
+
+    socket.on('answer', async ({ answer, callerId }) => {
+      const peerObj = peersRef.current[callerId];
+      if (peerObj && peerObj.peer) {
+        try {
+          await peerObj.peer.setRemoteDescription(new RTCSessionDescription(answer));
+        } catch (err) {
+          console.error('Error handling answer:', err);
+        }
+      }
+    });
+
+    socket.on('ice-candidate', async ({ candidate, callerId }) => {
+      const peerObj = peersRef.current[callerId];
+      if (peerObj && peerObj.peer) {
+        try {
+          await peerObj.peer.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (err) {
+          console.error('Error adding ice candidate:', err);
+        }
+      }
     });
 
     socket.on('playlist_updated', (data) => {
@@ -291,25 +366,101 @@ function App() {
 
 
   const [localStream, setLocalStream] = useState(null);
-  const localVideoRef = useRef(null);
+  const [remoteStreams, setRemoteStreams] = useState([]); // Array of { id, stream, username }
+  const [isMuted, setIsMuted] = useState(false);
+
+  const peersRef = useRef({}); // socketId -> { peer: RTCPeerConnection }
+  const localStreamRef = useRef(null);
+  const localVideoRef = useRef(null); // Keep for local preview in grid
+
+  // Helper to create peer connection
+  const createPeer = (targetId, isInitiator = false) => {
+    const peer = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:global.stun.twilio.com:3478' }
+      ]
+    });
+
+    peer.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit('ice-candidate', { candidate: event.candidate, target: targetId, callerId: socket.id });
+      }
+    };
+
+    peer.onnegotiationneeded = async () => {
+      try {
+        const offer = await peer.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+        await peer.setLocalDescription(offer);
+        socket.emit('offer', { offer, target: targetId, callerId: socket.id });
+      } catch (err) {
+        console.error('Error renegotiating:', err);
+      }
+    };
+
+    peer.ontrack = (event) => {
+      setRemoteStreams(prev => {
+        if (prev.find(p => p.id === targetId)) return prev;
+        // Find username from users list
+        // We need access to users state here. Since this is a callback, we might need a ref for users or just pass it?
+        // But createPeer is defined inside component, so it has closure access to 'users'.
+        // However, 'users' state might be stale in closure if createPeer isn't recreated.
+        // But createPeer is called when needed.
+        // Better to store username in peer object or just find it in render.
+        return [...prev, { id: targetId, stream: event.streams[0] }];
+      });
+    };
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => peer.addTrack(track, localStreamRef.current));
+    }
+
+    return peer;
+  };
 
   useEffect(() => {
     if (localStream && localVideoRef.current) {
       localVideoRef.current.srcObject = localStream;
     }
-  }, [localStream, activeTab]);
+  }, [localStream]);
 
   const handleToggleWebcam = async () => {
     if (localStream) {
       localStream.getTracks().forEach(track => track.stop());
       setLocalStream(null);
+      localStreamRef.current = null;
     } else {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         setLocalStream(stream);
+        localStreamRef.current = stream;
+        setIsMuted(false);
+
+        // Add to peers
+        Object.values(peersRef.current).forEach(({ peer }) => {
+          stream.getTracks().forEach(track => {
+            const senders = peer.getSenders();
+            const sender = senders.find(s => s.track && s.track.kind === track.kind);
+            if (sender) {
+              sender.replaceTrack(track);
+            } else {
+              peer.addTrack(track, stream);
+            }
+          });
+        });
       } catch (err) {
         console.error("Error accessing webcam:", err);
         alert("Could not access webcam/microphone");
+      }
+    }
+  };
+
+  const handleToggleMic = () => {
+    if (localStream) {
+      const audioTrack = localStream.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setIsMuted(!audioTrack.enabled);
       }
     }
   };
@@ -456,6 +607,57 @@ function App() {
               State: {isPlaying ? 'PLAYING' : 'PAUSED'} | Index: {currentIndex} | Type: {isYouTube ? 'YouTube' : 'MP4'}
             </div>
           </div>
+
+          <div className="video-grid">
+            {/* Local User */}
+            <div className="video-card">
+              <video
+                ref={localVideoRef}
+                autoPlay
+                playsInline
+                muted
+                style={{ opacity: localStream ? 1 : 0 }}
+              />
+              {!localStream && (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666' }}>
+                  Camera Off
+                </div>
+              )}
+              <div className="video-username">
+                {username} (You)
+              </div>
+              <div className="video-controls">
+                <button
+                  className={`control-btn ${isMuted ? 'off' : ''}`}
+                  onClick={handleToggleMic}
+                  title={isMuted ? "Unmute" : "Mute"}
+                >
+                  {isMuted ? "🔇" : "🎤"}
+                </button>
+                <button
+                  className={`control-btn ${!localStream ? 'off' : ''}`}
+                  onClick={handleToggleWebcam}
+                  title={localStream ? "Turn Off Camera" : "Turn On Camera"}
+                >
+                  {localStream ? "📷" : "🚫"}
+                </button>
+              </div>
+            </div>
+
+            {/* Remote Users */}
+            {remoteStreams.map(remote => {
+              const user = users.find(u => u.id === remote.id);
+              const remoteUsername = user ? user.username : 'Unknown';
+              return (
+                <div key={remote.id} className="video-card">
+                  <VideoPlayer stream={remote.stream} />
+                  <div className="video-username">
+                    {remoteUsername}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <aside className="sidebar glass">
@@ -549,29 +751,6 @@ function App() {
             </div>
           ) : (
             <div className="users-section" style={{ padding: '1rem', overflowY: 'auto' }}>
-              <div className="webcam-controls" style={{ marginBottom: '1rem' }}>
-                <button
-                  className={`btn ${localStream ? 'btn-danger' : 'btn-primary'}`}
-                  style={{ width: '100%' }}
-                  onClick={handleToggleWebcam}
-                >
-                  {localStream ? 'Turn Off Camera' : 'Turn On Camera'}
-                </button>
-                {localStream && (
-                  <div className="local-video-preview" style={{ marginTop: '1rem', borderRadius: '0.5rem', overflow: 'hidden', border: '1px solid var(--glass-border)' }}>
-                    <video
-                      ref={localVideoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      style={{ width: '100%', display: 'block', transform: 'scaleX(-1)' }}
-                    />
-                    <div style={{ padding: '0.5rem', background: 'rgba(0,0,0,0.5)', fontSize: '0.8rem', textAlign: 'center' }}>
-                      You (Preview)
-                    </div>
-                  </div>
-                )}
-              </div>
               <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem', color: 'var(--text-muted)' }}>Connected Users</h3>
               <div className="users-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {users.map((user, idx) => (
