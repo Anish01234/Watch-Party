@@ -131,6 +131,11 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomId);
     if (!room) return;
 
+    // Always update current time
+    if (data.currentTime !== undefined) {
+      room.currentTime = data.currentTime;
+    }
+
     switch (action) {
       case 'play':
         room.isPlaying = true;
@@ -141,7 +146,6 @@ io.on('connection', (socket) => {
         socket.to(roomId).emit('sync_pause', { currentTime: data.currentTime });
         break;
       case 'seek':
-        room.currentTime = data.currentTime;
         if (data.isPlaying !== undefined) {
           room.isPlaying = data.isPlaying;
         }

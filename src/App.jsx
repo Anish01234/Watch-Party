@@ -54,6 +54,25 @@ function App() {
         timestamp: msg.timestamp
       })));
       setJoined(true);
+
+      // Seek to current time if there is one
+      if (data.currentTime && data.currentTime > 0) {
+        setTimeout(() => {
+          isSyncingRef.current = true;
+          if (isYouTube && youtubePlayerRef.current) {
+            youtubePlayerRef.current.seekTo(data.currentTime, true);
+            if (data.isPlaying) {
+              youtubePlayerRef.current.playVideo();
+            }
+          } else if (videoRef.current) {
+            videoRef.current.currentTime = data.currentTime;
+            if (data.isPlaying) {
+              videoRef.current.play();
+            }
+          }
+          setTimeout(() => { isSyncingRef.current = false; }, 500);
+        }, 1000); // Wait for player to be ready
+      }
     });
 
     socket.on('user_joined', ({ username: newUser, userCount, users: updatedUsers }) => {
