@@ -29,12 +29,11 @@ function App() {
       setCurrentIndex(state.currentIndex || 0);
       setUserCount(state.users.length);
       setMessages(state.messages || []); // Load existing messages
+      setIsPlaying(state.isPlaying || false); // Set initial playing state
 
       // Sync initial playback state
       if (videoRef.current && state.isPlaying) {
         videoRef.current.seekTo(state.currentTime || 0);
-        // ReactPlayer handles play state via props, but we can't easily force it here without state
-        // We'll rely on the isPlaying prop in the render method
       }
     });
 
@@ -49,9 +48,9 @@ function App() {
     socket.on('video_changed', ({ currentIndex: newIndex, currentTime, isPlaying }) => {
       console.log('Video changed:', newIndex);
       setCurrentIndex(newIndex);
+      setIsPlaying(isPlaying || false); // Set playing state from server
       if (videoRef.current) {
         videoRef.current.seekTo(currentTime || 0);
-        // isPlaying will be handled by state update in render
       }
     });
 
@@ -192,8 +191,10 @@ function App() {
   };
 
   const forcePlay = () => {
+    if (!currentVideoUrl) return;
     setIsPlaying(true);
-    handlePlay();
+    const currentTime = videoRef.current ? videoRef.current.getCurrentTime() : 0;
+    socket.emit('sync_action', { roomId, action: 'play', data: { currentTime } });
   };
 
   if (!joined) {
@@ -260,6 +261,9 @@ function App() {
                 controls={true}
                 width="100%"
                 height="100%"
+                onReady={() => {
+                  console.log('Player ready:', currentVideoUrl);
+                }}
                 onPlay={handlePlay}
                 onPause={handlePause}
                 onProgress={({ playedSeconds }) => {
@@ -275,7 +279,8 @@ function App() {
                     playerVars: {
                       showinfo: 1,
                       modestbranding: 1,
-                      rel: 0
+                      rel: 0,
+                      autoplay: 0
                     }
                   },
                   file: {
