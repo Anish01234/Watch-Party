@@ -123,6 +123,11 @@ function App() {
       });
     });
 
+    socket.on('kicked', () => {
+      alert('You have been kicked from the room.');
+      window.location.reload();
+    });
+
     socket.on('user_joined', async ({ username: newUser, users: updatedUsers }) => {
       console.log(`${newUser} joined`);
       if (updatedUsers) setUsers(updatedUsers);
@@ -417,6 +422,7 @@ function App() {
   const [reactions, setReactions] = useState([]);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [speakingUsers, setSpeakingUsers] = useState(new Set());
+  const [maximizedVideo, setMaximizedVideo] = useState(null);
 
   const peersRef = useRef({}); // socketId -> { peer: RTCPeerConnection }
   const localStreamRef = useRef(null);
@@ -895,7 +901,10 @@ function App() {
                 autoPlay
                 playsInline
                 muted
-                style={{ opacity: (localStream && localStream.getVideoTracks().length > 0) ? 1 : 0 }}
+                style={{
+                  opacity: (localStream && localStream.getVideoTracks().length > 0) ? 1 : 0,
+                  transform: isScreenSharing ? 'none' : 'scaleX(-1)'
+                }}
               />
               {(!localStream || localStream.getVideoTracks().length === 0) && (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666' }}>
@@ -936,6 +945,13 @@ function App() {
                     🔄
                   </button>
                 )}
+                <button
+                  className="control-btn"
+                  onClick={() => setMaximizedVideo({ stream: localStream, username: `${username} (You)`, isLocal: true })}
+                  title="Maximize"
+                >
+                  ⤢
+                </button>
               </div>
             </div>
 
@@ -948,6 +964,15 @@ function App() {
                   <VideoPlayer stream={remote.stream} />
                   <div className="video-username">
                     {remoteUsername}
+                  </div>
+                  <div className="video-controls">
+                    <button
+                      className="control-btn"
+                      onClick={() => setMaximizedVideo({ stream: remote.stream, username: remoteUsername, isLocal: false })}
+                      title="Maximize"
+                    >
+                      ⤢
+                    </button>
                   </div>
                   {remote.isMuted && (
                     <div style={{ position: 'absolute', top: '0.5rem', right: '0.5rem', background: 'rgba(0,0,0,0.6)', padding: '0.25rem', borderRadius: '50%' }}>
@@ -1095,6 +1120,19 @@ function App() {
                     </div>
                     <span style={{ flex: 1 }}>{user.username} {user.username === username && '(You)'}</span>
                     {user.id === adminId && <span title="Admin" style={{ fontSize: '1.2rem' }}>👑</span>}
+                    {socket.id === adminId && user.id !== socket.id && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`Kick ${user.username}?`)) {
+                            socket.emit('kick_user', { roomId: roomIdRef.current, targetId: user.id });
+                          }
+                        }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1rem' }}
+                        title="Kick User"
+                      >
+                        👢
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1102,6 +1140,36 @@ function App() {
           )}
         </aside>
       </main>
+      {maximizedVideo && (
+        <div className="maximized-overlay" style={{
+          position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.9)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }}>
+          <button onClick={() => setMaximizedVideo(null)} style={{
+            position: 'absolute', top: '1rem', right: '1rem',
+            background: 'rgba(255,255,255,0.2)', color: 'white', border: 'none',
+            fontSize: '2rem', cursor: 'pointer', borderRadius: '50%', width: '50px', height: '50px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>✕</button>
+
+          <div style={{ width: '90%', height: '90%', position: 'relative' }}>
+            {maximizedVideo.isLocal ? (
+              <video
+                ref={(el) => {
+                  if (el) el.srcObject = maximizedVideo.stream;
+                }}
+                autoPlay playsInline muted
+                style={{ width: '100%', height: '100%', objectFit: 'contain', transform: isScreenSharing ? 'none' : 'scaleX(-1)' }}
+              />
+            ) : (
+              <VideoPlayer stream={maximizedVideo.stream} />
+            )}
+            <div style={{ position: 'absolute', bottom: '1rem', left: '1rem', background: 'rgba(0,0,0,0.6)', padding: '0.5rem 1rem', borderRadius: '0.5rem', color: 'white', fontSize: '1.5rem' }}>
+              {maximizedVideo.username}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

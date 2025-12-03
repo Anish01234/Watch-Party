@@ -233,6 +233,29 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('reaction_received', { emoji, userId: socket.id });
   });
 
+  // Kick User
+  socket.on('kick_user', ({ roomId, targetId }) => {
+    const room = rooms.get(roomId);
+    if (room && room.adminId === socket.id) {
+      io.to(targetId).emit('kicked');
+
+      const userIndex = room.users.findIndex(u => u.id === targetId);
+      if (userIndex !== -1) {
+        const kickedUser = room.users[userIndex];
+        room.users.splice(userIndex, 1);
+        io.to(roomId).emit('user_left', {
+          username: kickedUser.username,
+          users: room.users
+        });
+
+        const targetSocket = io.sockets.sockets.get(targetId);
+        if (targetSocket) {
+          targetSocket.leave(roomId);
+        }
+      }
+    }
+  });
+
   // Handle disconnect
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
