@@ -387,7 +387,7 @@ function App() {
 
   const [localStream, setLocalStream] = useState(null);
   const [remoteStreams, setRemoteStreams] = useState([]); // Array of { id, stream, username, isMuted }
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
   const [facingMode, setFacingMode] = useState('user');
 
   const peersRef = useRef({}); // socketId -> { peer: RTCPeerConnection }
@@ -448,59 +448,71 @@ function App() {
 
   const handleToggleWebcam = async () => {
     if (localStream) {
-      localStream.getTracks().forEach(track => track.stop());
-      setLocalStream(null);
-      localStreamRef.current = null;
+      const videoTrack = localStream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.stop();
+        localStream.removeTrack(videoTrack);
+        Object.values(peersRef.current).forEach(({ peer }) => {
+          const senders = peer.getSenders();
+          const sender = senders.find(s => s.track && s.track.kind === 'video');
+          if (sender) peer.removeTrack(sender);
+        });
+        if (localStream.getAudioTracks().length === 0) {
+          setLocalStream(null);
+          localStreamRef.current = null;
+        } else {
+          setLocalStream(new MediaStream(localStream.getTracks()));
+          localStreamRef.current = new MediaStream(localStream.getTracks());
+        }
+      } else {
+        try {
+          const videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode } });
+          const newVideoTrack = videoStream.getVideoTracks()[0];
+          localStream.addTrack(newVideoTrack);
+          Object.values(peersRef.current).forEach(({ peer }) => {
+            peer.addTrack(newVideoTrack, localStream);
+          });
+          setLocalStream(new MediaStream(localStream.getTracks()));
+          localStreamRef.current = new MediaStream(localStream.getTracks());
+        } catch (err) { console.error(err); }
+      }
     } else {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode },
-          audio: true
-        });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: true });
+        stream.getAudioTracks().forEach(t => t.enabled = false);
+        setIsMuted(true);
+        socket.emit('toggle_mute', { roomId: roomIdRef.current, isMuted: true });
         setLocalStream(stream);
         localStreamRef.current = stream;
-        setIsMuted(false);
-
-        // Add to peers
         Object.values(peersRef.current).forEach(({ peer }) => {
-          stream.getTracks().forEach(track => {
-            const senders = peer.getSenders();
-            const sender = senders.find(s => s.track && s.track.kind === track.kind);
-            if (sender) {
-              sender.replaceTrack(track);
-            } else {
-              peer.addTrack(track, stream);
-            }
-          });
+          stream.getTracks().forEach(track => peer.addTrack(track, stream));
         });
-      } catch (err) {
-        console.error("Error accessing webcam:", err);
-        alert("Could not access webcam/microphone");
-      }
+      } catch (err) { console.error(err); }
     }
   };
 
   const handleFlipCamera = async () => {
-    if (!localStream) return;
+    if (!localStream || localStream.getVideoTracks().length === 0) return;
     const newMode = facingMode === 'user' ? 'environment' : 'user';
     setFacingMode(newMode);
-    localStream.getTracks().forEach(t => t.stop());
+    localStream.getVideoTracks().forEach(t => t.stop());
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: newMode }, audio: true });
-      stream.getAudioTracks().forEach(t => t.enabled = !isMuted);
-      setLocalStream(stream);
-      localStreamRef.current = stream;
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: newMode } });
+      const newTrack = stream.getVideoTracks()[0];
+      localStream.getVideoTracks().forEach(t => localStream.removeTrack(t));
+      localStream.addTrack(newTrack);
+      setLocalStream(new MediaStream(localStream.getTracks()));
+      localStreamRef.current = new MediaStream(localStream.getTracks());
       Object.values(peersRef.current).forEach(({ peer }) => {
-        stream.getTracks().forEach(track => {
-          const senders = peer.getSenders();
-          const sender = senders.find(s => s.track && s.track.kind === track.kind);
-          if (sender) sender.replaceTrack(track);
-        });
+        const senders = peer.getSenders();
+        const sender = senders.find(s => s.track && s.track.kind === 'video');
+        if (sender) sender.replaceTrack(newTrack);
+        else peer.addTrack(newTrack, localStream);
       });
     } catch (err) { console.error("Error flipping camera:", err); }
   };
 
-  const handleToggleMic = () => {
+  const handleToggleMic = async () => {
     if (localStream) {
       const audioTrack = localStream.getAudioTracks()[0];
       if (audioTrack) {
@@ -508,7 +520,31 @@ function App() {
         const isNowMuted = !audioTrack.enabled;
         setIsMuted(isNowMuted);
         socket.emit('toggle_mute', { roomId: roomIdRef.current, isMuted: isNowMuted });
+      } else {
+        try {
+          const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const audioTrack = audioStream.getAudioTracks()[0];
+          localStream.addTrack(audioTrack);
+          setIsMuted(false);
+          socket.emit('toggle_mute', { roomId: roomIdRef.current, isMuted: false });
+          Object.values(peersRef.current).forEach(({ peer }) => {
+            peer.addTrack(audioTrack, localStream);
+          });
+          setLocalStream(new MediaStream(localStream.getTracks()));
+          localStreamRef.current = new MediaStream(localStream.getTracks());
+        } catch (err) { console.error(err); }
       }
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        setLocalStream(stream);
+        localStreamRef.current = stream;
+        setIsMuted(false);
+        socket.emit('toggle_mute', { roomId: roomIdRef.current, isMuted: false });
+        Object.values(peersRef.current).forEach(({ peer }) => {
+          stream.getTracks().forEach(track => peer.addTrack(track, stream));
+        });
+      } catch (err) { console.error(err); }
     }
   };
 
@@ -675,9 +711,9 @@ function App() {
                 autoPlay
                 playsInline
                 muted
-                style={{ opacity: localStream ? 1 : 0 }}
+                style={{ opacity: (localStream && localStream.getVideoTracks().length > 0) ? 1 : 0 }}
               />
-              {!localStream && (
+              {(!localStream || localStream.getVideoTracks().length === 0) && (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666' }}>
                   Camera Off
                 </div>
@@ -694,13 +730,13 @@ function App() {
                   {isMuted ? "🔇" : "🎤"}
                 </button>
                 <button
-                  className={`control-btn ${!localStream ? 'off' : ''}`}
+                  className={`control-btn ${(!localStream || localStream.getVideoTracks().length === 0) ? 'off' : ''}`}
                   onClick={handleToggleWebcam}
-                  title={localStream ? "Turn Off Camera" : "Turn On Camera"}
+                  title={(localStream && localStream.getVideoTracks().length > 0) ? "Turn Off Camera" : "Turn On Camera"}
                 >
-                  {localStream ? "📷" : "🚫"}
+                  {(localStream && localStream.getVideoTracks().length > 0) ? "📷" : "🚫"}
                 </button>
-                {localStream && (
+                {localStream && localStream.getVideoTracks().length > 0 && (
                   <button
                     className="control-btn"
                     onClick={handleFlipCamera}
