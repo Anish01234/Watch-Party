@@ -13,6 +13,9 @@ function App() {
   const [playlist, setPlaylist] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userCount, setUserCount] = useState(1);
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [activeTab, setActiveTab] = useState('chat'); // 'chat' or 'playlist'
 
   const videoRef = useRef(null);
   const isSyncingRef = useRef(false);
@@ -109,6 +112,10 @@ function App() {
       setUserCount(count);
     });
 
+    socket.on('chat_message', (message) => {
+      setMessages((prev) => [...prev, message]);
+    });
+
     return () => {
       socket.off('room_state');
       socket.off('playlist_updated');
@@ -119,8 +126,17 @@ function App() {
       socket.off('request_sync');
       socket.off('user_joined');
       socket.off('user_left');
+      socket.off('chat_message');
     };
   }, []);
+
+  const handleSendMessage = (e) => {
+    e.preventDefault();
+    if (newMessage.trim()) {
+      socket.emit('send_message', { roomId, message: newMessage, username });
+      setNewMessage('');
+    }
+  };
 
   const handleJoinRoom = (e) => {
     e.preventDefault();
@@ -296,52 +312,100 @@ function App() {
           </div>
         </div>
 
-        <div className="playlist-section glass">
-          <h3>Playlist</h3>
-
-          <form onSubmit={handleAddVideo} className="add-video-form">
-            <input
-              type="text"
-              className="input"
-              placeholder="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-              value={videoUrl}
-              onChange={(e) => setVideoUrl(e.target.value)}
-            />
-            <button type="submit" className="btn btn-primary">
-              + Add
+        <div className="sidebar glass">
+          <div className="tabs">
+            <button
+              className={`tab-btn ${activeTab === 'chat' ? 'active' : ''}`}
+              onClick={() => setActiveTab('chat')}
+            >
+              💬 Chat
             </button>
-          </form>
-
-          <div className="playlist-items">
-            {playlist.length === 0 ? (
-              <div className="empty-playlist">
-                <p>No videos in playlist</p>
-                <p className="hint">Add a direct video URL (.mp4) above</p>
-              </div>
-            ) : (
-              playlist.map((url, index) => (
-                <div
-                  key={`${url}-${index}`}
-                  className={`playlist-item ${index === currentIndex ? 'active' : ''}`}
-                >
-                  <div className="playlist-item-info" onClick={() => handleChangeVideo(index)}>
-                    <span className="playlist-number">{index + 1}</span>
-                    <span className="playlist-url" title={url}>{url}</span>
-                    {index === currentIndex && <span className="now-playing">▶ Now Playing</span>}
-                  </div>
-                  <button
-                    className="btn-remove"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleRemoveVideo(index);
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))
-            )}
+            <button
+              className={`tab-btn ${activeTab === 'playlist' ? 'active' : ''}`}
+              onClick={() => setActiveTab('playlist')}
+            >
+              📺 Playlist
+            </button>
           </div>
+
+          {activeTab === 'chat' ? (
+            <div className="chat-section">
+              <div className="messages-list">
+                {messages.length === 0 ? (
+                  <div className="empty-chat">
+                    <p>No messages yet</p>
+                    <p className="hint">Say hello!</p>
+                  </div>
+                ) : (
+                  messages.map((msg) => (
+                    <div key={msg.id} className={`message ${msg.username === username ? 'own' : ''}`}>
+                      <div className="message-header">
+                        <span className="username">{msg.username}</span>
+                        <span className="timestamp">{msg.timestamp}</span>
+                      </div>
+                      <div className="message-content">{msg.message}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+              <form onSubmit={handleSendMessage} className="chat-form">
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Type a message..."
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                />
+                <button type="submit" className="btn btn-primary">Send</button>
+              </form>
+            </div>
+          ) : (
+            <div className="playlist-section">
+              <form onSubmit={handleAddVideo} className="add-video-form">
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Paste video URL"
+                  value={videoUrl}
+                  onChange={(e) => setVideoUrl(e.target.value)}
+                />
+                <button type="submit" className="btn btn-primary">
+                  + Add
+                </button>
+              </form>
+
+              <div className="playlist-items">
+                {playlist.length === 0 ? (
+                  <div className="empty-playlist">
+                    <p>No videos in playlist</p>
+                    <p className="hint">Add a video URL above</p>
+                  </div>
+                ) : (
+                  playlist.map((url, index) => (
+                    <div
+                      key={`${url}-${index}`}
+                      className={`playlist-item ${index === currentIndex ? 'active' : ''}`}
+                    >
+                      <div className="playlist-item-info" onClick={() => handleChangeVideo(index)}>
+                        <span className="playlist-number">{index + 1}</span>
+                        <span className="playlist-url" title={url}>{url}</span>
+                        {index === currentIndex && <span className="now-playing">▶ Playing</span>}
+                      </div>
+                      <button
+                        className="btn-remove"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveVideo(index);
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

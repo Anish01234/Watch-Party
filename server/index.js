@@ -142,6 +142,16 @@ io.on('connection', (socket) => {
     io.to(requesterId).emit('sync_seek', { currentTime, isPlaying });
   });
 
+  // Handle chat messages
+  socket.on('send_message', ({ roomId, message, username }) => {
+    io.to(roomId).emit('chat_message', {
+      id: Date.now(),
+      username,
+      message,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    });
+  });
+
   // Handle disconnect
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
