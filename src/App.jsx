@@ -174,18 +174,10 @@ function App() {
       if (updatedUsers) setUsers(updatedUsers);
 
       // Initiate WebRTC call to new user
-      updatedUsers.forEach(async (user) => {
+      updatedUsers.forEach((user) => {
         if (user.id !== socket.id && !peersRef.current[user.id]) {
           const peer = createPeer(user.id, true);
           peersRef.current[user.id] = { peer };
-
-          try {
-            const offer = await peer.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-            await peer.setLocalDescription(offer);
-            socket.emit('offer', { offer, target: user.id, callerId: socket.id });
-          } catch (err) {
-            console.error('Error creating offer:', err);
-          }
         }
       });
     });
@@ -484,15 +476,17 @@ function App() {
       }
     };
 
-    peer.onnegotiationneeded = async () => {
-      try {
-        const offer = await peer.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-        await peer.setLocalDescription(offer);
-        socket.emit('offer', { offer, target: targetId, callerId: socket.id });
-      } catch (err) {
-        console.error('Error renegotiating:', err);
-      }
-    };
+    if (isInitiator) {
+      peer.onnegotiationneeded = async () => {
+        try {
+          const offer = await peer.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+          await peer.setLocalDescription(offer);
+          socket.emit('offer', { offer, target: targetId, callerId: socket.id });
+        } catch (err) {
+          console.error('Error renegotiating:', err);
+        }
+      };
+    }
 
     peer.ontrack = (event) => {
       setRemoteStreams(prev => {
